@@ -1,7 +1,7 @@
 import streamlit as st
 import pandas as pd
-from auth import login_ui, ensure_admin_bootstrap_ui
-from sheets import read_df, write_df
+from utils.auth import login_ui, ensure_admin_bootstrap_ui
+from utils.sheets import read_df, write_df
 
 st.set_page_config(page_title="Admin – TV Corporativa", layout="wide")
 

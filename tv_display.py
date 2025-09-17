@@ -1,7 +1,7 @@
 import streamlit as st
 import pandas as pd
-from sheets import read_df
-from api import fetch_fx_brl, fetch_crypto_brl, fetch_weather, now_tz
+from utils.sheets import read_df
+from utils.api import fetch_fx_brl, fetch_crypto_brl, fetch_weather, now_tz
 
 st.set_page_config(page_title="TV Corporativa", layout="wide")
 
