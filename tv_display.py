@@ -1,12 +1,12 @@
+import streamlit as st
+import pandas as pd
 import re
 import requests
 from urllib.parse import urlparse, parse_qs
-import streamlit as st
-import pandas as pd
-from utils.sheets import read_df
-from utils.api import fetch_fx_brl, fetch_crypto_brl, fetch_weather, now_tz
 from streamlit_autorefresh import st_autorefresh
 
+from utils.sheets import read_df
+from utils.api import fetch_fx_brl, fetch_crypto_brl, fetch_weather, now_tz
 
 st.set_page_config(page_title="TV Corporativa", layout="wide")
 
@@ -66,52 +66,19 @@ locs = locs[locs["is_active"].astype(str).str.upper().isin(["TRUE","1","YES","SI
 clocks = read_df("clocks", CLK_HEADERS)
 clocks = clocks[clocks["is_active"].astype(str).str.upper().isin(["TRUE","1","YES","SIM","Y"])].sort_values("order")
 
-# === Autorefresh / Índices ===
-# 1) Ler query params com a nova API
-params = st.query_params  # dict-like
-news_count = int(params.get("nc", "0"))
-bday_count = int(params.get("bc", "0"))
-video_count = int(params.get("vc", "0"))
-
-# 2) Incrementar contadores (se houver itens)
-nc = news_count + 1 if not news.empty else 0
-bc = bday_count + 1 if not birth.empty else 0
-vc = video_count + 1 if not vids.empty else 0
-
-# 3) Gravar de volta nos query params (nova API)
-st.query_params.update({"nc": str(nc), "bc": str(bc), "vc": str(vc)})
-
-# 4) Selecionar índices atuais
-news_idx = (nc - 1) % len(news) if len(news) else 0
-bday_idx = (bc - 1) % len(birth) if len(birth) else 0
-vid_idx  = (vc - 1) % len(vids) if len(vids) else 0
-
-# 5) Auto-refresh
-# OBS: abaixo eu mantive 3 timers independentes como você tinha.
-# Em páginas Streamlit, múltiplos autorefresh vão provocar recarregamentos em tempos diferentes,
-# o que na prática significa que a página recarrega no menor intervalo configurado.
-# Se quiser respeitar cadências diferentes por seção, recomendo depois migrar para UM único
-# st_autorefresh e controlar a rotação via timestamps em st.session_state.
-st_autorefresh(interval=NEWS_MS, key="news_tick")
-st_autorefresh(interval=BDAY_MS, key="bday_tick")
-st_autorefresh(interval=VIDEO_MS, key="video_tick")
-
 # ==== Helpers de vídeo (YouTube / Google Drive / Link direto) ====
-
 YOUTUBE_PATTERNS = [
-    r"(?:v=|\/embed\/|youtu\.be\/)([A-Za-z0-9_-]{11})",
+    r"(?:v=|/embed/|youtu\\.be/)([A-Za-z0-9_-]{11})",
 ]
 
 def extract_youtube_id(url: str) -> str | None:
     u = str(url or "").strip()
     if not u:
         return None
-    # tenta regex
     for pat in YOUTUBE_PATTERNS:
         m = re.search(pat, u)
         if m:
             return m.group(1)
-    # tenta query param v=
     try:
         q = parse_qs(urlparse(u).query)
         if "v" in q and len(q["v"]) > 0 and len(q["v"][0]) == 11:
@@ -121,17 +88,12 @@ def extract_youtube_id(url: str) -> str | None:
     return None
 
 def extract_drive_id(url: str) -> str | None:
-    """Suporta formatos:
-       https://drive.google.com/file/d/FILE_ID/view?usp=sharing
-       https://drive.google.com/uc?export=download&id=FILE_ID
-    """
     u = str(url or "").strip()
     if not u:
         return None
     m = re.search(r"/file/d/([A-Za-z0-9_-]+)/", u)
     if m:
         return m.group(1)
-    # tenta por query id=
     try:
         q = parse_qs(urlparse(u).query)
         if "id" in q and len(q["id"]) > 0:
@@ -140,14 +102,14 @@ def extract_drive_id(url: str) -> str | None:
         pass
     return None
 
-def render_video(url: str, *, height: int = 380):
-    """Renderiza vídeo com fallback inteligente."""
+def render_video(url: str):
+    """Renderiza vídeo com fallback: YouTube -> Drive -> MP4 -> iframe genérico."""
     u = str(url or "").strip()
     if not u:
         st.warning("URL de vídeo vazia.")
         return
 
-    # 1) YouTube -> embed <iframe>
+    # YouTube
     if "youtube.com" in u or "youtu.be" in u:
         vid = extract_youtube_id(u)
         if vid:
@@ -167,7 +129,7 @@ def render_video(url: str, *, height: int = 380):
             )
             return
 
-    # 2) Google Drive -> /preview <iframe>
+    # Google Drive
     if "drive.google.com" in u:
         fid = extract_drive_id(u)
         if fid:
@@ -187,22 +149,22 @@ def render_video(url: str, *, height: int = 380):
             )
             return
 
-    # 3) Link direto (mp4/webm/ogg) -> tenta HEAD e usa st.video
+    # Link direto
+    ct = ""
     try:
         h = requests.head(u, allow_redirects=True, timeout=8)
         ct = (h.headers.get("content-type") or "").lower()
     except Exception:
-        ct = ""
+        pass
 
     if any(u.lower().endswith(ext) for ext in (".mp4", ".webm", ".ogg")) or "video" in ct:
-        # st.video aceita URL direta pública
         try:
             st.video(u)
             return
         except Exception:
-            pass  # cai pro fallback
+            pass
 
-    # 4) Fallback genérico em iframe (alguns players/CDNs funcionam)
+    # Fallback genérico
     st.markdown(
         f"""
         <div style="position:relative;padding-bottom:56.25%;height:0;overflow:hidden;border-radius:12px;">
@@ -217,6 +179,27 @@ def render_video(url: str, *, height: int = 380):
         """,
         unsafe_allow_html=True,
     )
+
+# === Autorefresh / Índices (API nova) ===
+params = st.query_params  # dict-like
+news_count = int(params.get("nc", "0"))
+bday_count = int(params.get("bc", "0"))
+video_count = int(params.get("vc", "0"))
+
+nc = news_count + 1 if not news.empty else 0
+bc = bday_count + 1 if not birth.empty else 0
+vc = video_count + 1 if not vids.empty else 0
+
+st.query_params.update({"nc": str(nc), "bc": str(bc), "vc": str(vc)})
+
+news_idx = (nc - 1) % len(news) if len(news) else 0
+bday_idx = (bc - 1) % len(birth) if len(birth) else 0
+vid_idx  = (vc - 1) % len(vids) if len(vids) else 0
+
+# Auto-refresh (múltiplos timers: a página recarrega no menor intervalo configurado)
+st_autorefresh(interval=NEWS_MS, key="news_tick")
+st_autorefresh(interval=BDAY_MS, key="bday_tick")
+st_autorefresh(interval=VIDEO_MS, key="video_tick")
 
 # === GRID ===
 col1, col2 = st.columns([2, 1])
@@ -252,7 +235,6 @@ with col2:
             st.balloons()  # efeito festivo
             if str(b["photo_url"]).strip():
                 st.image(b["photo_url"], use_container_width=True)
-            # dia/mês como inteiros (se possível)
             try:
                 dia = int(b["day"])
             except Exception:
