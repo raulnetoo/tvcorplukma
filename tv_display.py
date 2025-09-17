@@ -2,6 +2,8 @@ import streamlit as st
 import pandas as pd
 from utils.sheets import read_df
 from utils.api import fetch_fx_brl, fetch_crypto_brl, fetch_weather, now_tz
+from streamlit_autorefresh import st_autorefresh
+
 
 st.set_page_config(page_title="TV Corporativa", layout="wide")
 
@@ -62,23 +64,34 @@ clocks = read_df("clocks", CLK_HEADERS)
 clocks = clocks[clocks["is_active"].astype(str).str.upper().isin(["TRUE","1","YES","SIM","Y"])].sort_values("order")
 
 # === Autorefresh / Índices ===
-params = st.experimental_get_query_params()
-news_count = int(params.get("nc", ["0"])[0])
-bday_count = int(params.get("bc", ["0"])[0])
-video_count = int(params.get("vc", ["0"])[0])
+# 1) Ler query params com a nova API
+params = st.query_params  # dict-like
+news_count = int(params.get("nc", "0"))
+bday_count = int(params.get("bc", "0"))
+video_count = int(params.get("vc", "0"))
 
+# 2) Incrementar contadores (se houver itens)
 nc = news_count + 1 if not news.empty else 0
 bc = bday_count + 1 if not birth.empty else 0
 vc = video_count + 1 if not vids.empty else 0
 
-st.experimental_set_query_params(nc=str(nc), bc=str(bc), vc=str(vc))
-st.autorefresh(interval=NEWS_MS, key="news_tick")
-st.autorefresh(interval=BDAY_MS, key="bday_tick")
-st.autorefresh(interval=VIDEO_MS, key="video_tick")
+# 3) Gravar de volta nos query params (nova API)
+st.query_params.update({"nc": str(nc), "bc": str(bc), "vc": str(vc)})
 
+# 4) Selecionar índices atuais
 news_idx = (nc - 1) % len(news) if len(news) else 0
 bday_idx = (bc - 1) % len(birth) if len(birth) else 0
-vid_idx = (vc - 1) % len(vids) if len(vids) else 0
+vid_idx  = (vc - 1) % len(vids) if len(vids) else 0
+
+# 5) Auto-refresh
+# OBS: abaixo eu mantive 3 timers independentes como você tinha.
+# Em páginas Streamlit, múltiplos autorefresh vão provocar recarregamentos em tempos diferentes,
+# o que na prática significa que a página recarrega no menor intervalo configurado.
+# Se quiser respeitar cadências diferentes por seção, recomendo depois migrar para UM único
+# st_autorefresh e controlar a rotação via timestamps em st.session_state.
+st_autorefresh(interval=NEWS_MS, key="news_tick")
+st_autorefresh(interval=BDAY_MS, key="bday_tick")
+st_autorefresh(interval=VIDEO_MS, key="video_tick")
 
 # === GRID ===
 col1, col2 = st.columns([2, 1])
