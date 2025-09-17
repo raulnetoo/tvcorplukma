@@ -1,3 +1,6 @@
+import re
+import requests
+from urllib.parse import urlparse, parse_qs
 import streamlit as st
 import pandas as pd
 from utils.sheets import read_df
@@ -93,6 +96,128 @@ st_autorefresh(interval=NEWS_MS, key="news_tick")
 st_autorefresh(interval=BDAY_MS, key="bday_tick")
 st_autorefresh(interval=VIDEO_MS, key="video_tick")
 
+# ==== Helpers de vídeo (YouTube / Google Drive / Link direto) ====
+
+YOUTUBE_PATTERNS = [
+    r"(?:v=|\/embed\/|youtu\.be\/)([A-Za-z0-9_-]{11})",
+]
+
+def extract_youtube_id(url: str) -> str | None:
+    u = str(url or "").strip()
+    if not u:
+        return None
+    # tenta regex
+    for pat in YOUTUBE_PATTERNS:
+        m = re.search(pat, u)
+        if m:
+            return m.group(1)
+    # tenta query param v=
+    try:
+        q = parse_qs(urlparse(u).query)
+        if "v" in q and len(q["v"]) > 0 and len(q["v"][0]) == 11:
+            return q["v"][0]
+    except Exception:
+        pass
+    return None
+
+def extract_drive_id(url: str) -> str | None:
+    """Suporta formatos:
+       https://drive.google.com/file/d/FILE_ID/view?usp=sharing
+       https://drive.google.com/uc?export=download&id=FILE_ID
+    """
+    u = str(url or "").strip()
+    if not u:
+        return None
+    m = re.search(r"/file/d/([A-Za-z0-9_-]+)/", u)
+    if m:
+        return m.group(1)
+    # tenta por query id=
+    try:
+        q = parse_qs(urlparse(u).query)
+        if "id" in q and len(q["id"]) > 0:
+            return q["id"][0]
+    except Exception:
+        pass
+    return None
+
+def render_video(url: str, *, height: int = 380):
+    """Renderiza vídeo com fallback inteligente."""
+    u = str(url or "").strip()
+    if not u:
+        st.warning("URL de vídeo vazia.")
+        return
+
+    # 1) YouTube -> embed <iframe>
+    if "youtube.com" in u or "youtu.be" in u:
+        vid = extract_youtube_id(u)
+        if vid:
+            st.markdown(
+                f"""
+                <div style="position:relative;padding-bottom:56.25%;height:0;overflow:hidden;border-radius:12px;">
+                  <iframe
+                    src="https://www.youtube.com/embed/{vid}?autoplay=1&mute=1&controls=1&rel=0"
+                    frameborder="0"
+                    allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share"
+                    allowfullscreen
+                    style="position:absolute;top:0;left:0;width:100%;height:100%;border:0;border-radius:12px;">
+                  </iframe>
+                </div>
+                """,
+                unsafe_allow_html=True,
+            )
+            return
+
+    # 2) Google Drive -> /preview <iframe>
+    if "drive.google.com" in u:
+        fid = extract_drive_id(u)
+        if fid:
+            st.markdown(
+                f"""
+                <div style="position:relative;padding-bottom:56.25%;height:0;overflow:hidden;border-radius:12px;">
+                  <iframe
+                    src="https://drive.google.com/file/d/{fid}/preview"
+                    frameborder="0"
+                    allow="autoplay"
+                    allowfullscreen
+                    style="position:absolute;top:0;left:0;width:100%;height:100%;border:0;border-radius:12px;">
+                  </iframe>
+                </div>
+                """,
+                unsafe_allow_html=True,
+            )
+            return
+
+    # 3) Link direto (mp4/webm/ogg) -> tenta HEAD e usa st.video
+    try:
+        h = requests.head(u, allow_redirects=True, timeout=8)
+        ct = (h.headers.get("content-type") or "").lower()
+    except Exception:
+        ct = ""
+
+    if any(u.lower().endswith(ext) for ext in (".mp4", ".webm", ".ogg")) or "video" in ct:
+        # st.video aceita URL direta pública
+        try:
+            st.video(u)
+            return
+        except Exception:
+            pass  # cai pro fallback
+
+    # 4) Fallback genérico em iframe (alguns players/CDNs funcionam)
+    st.markdown(
+        f"""
+        <div style="position:relative;padding-bottom:56.25%;height:0;overflow:hidden;border-radius:12px;">
+          <iframe
+            src="{u}"
+            frameborder="0"
+            allow="autoplay; encrypted-media"
+            allowfullscreen
+            style="position:absolute;top:0;left:0;width:100%;height:100%;border:0;border-radius:12px;">
+          </iframe>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+
 # === GRID ===
 col1, col2 = st.columns([2, 1])
 
@@ -115,7 +240,7 @@ with col1:
         st.info("Cadastre vídeos no admin.")
     else:
         v = vids.iloc[vid_idx]
-        st.video(v["url"])
+        render_video(v["url"])
 
 with col2:
     st.markdown("<h2 class='title'>Aniversariantes do mês</h2>", unsafe_allow_html=True)
